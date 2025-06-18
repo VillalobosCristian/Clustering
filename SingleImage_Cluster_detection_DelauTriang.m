@@ -38,7 +38,7 @@ fprintf('Found %d tracks with length >= %d\n', count, min_track_length);
 
 %%
 % For now, let's work with a single time point to develop the method
-targetTime = 1000;  % Starting 
+targetTime = 1;  % Starting 
 calib = 1.0;        % 
 positions = [];
 particle_ids = [];  % Keep track of which particle is which
