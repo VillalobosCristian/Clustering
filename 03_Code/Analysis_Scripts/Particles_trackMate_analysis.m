@@ -1,6 +1,7 @@
 % Clear workspace and command window
 clear all;
 clc;
+close all
 
 % Open file dialog to zselect CSV file
 [file_name, path_name] = uigetfile('*.csv', 'Select a CSV file');
@@ -241,7 +242,7 @@ pos = get(gcf, 'Position');
 set(gcf, 'Position', [pos(1), pos(2), 8, 6]);
     baseDir = pwd;
 fileName = 'Trajectories_fin';
-% savefigures(baseDir, fileName);
+savefigures(baseDir, fileName);
 
 %% 
 final_positions_x = zeros(length(X), 1);
@@ -321,6 +322,7 @@ y_bins = linspace(y_min, y_max, ny+1);
 % Initialize velocity arrays
 vx_map = zeros(ny, nx);
 vy_map = zeros(ny, nx);
+
 count_map = zeros(ny, nx);
 
 % Accumulate velocities in each spatial bin
@@ -403,7 +405,7 @@ axis([x_min-margin, x_max+margin, y_min-margin, y_max+margin]);
 set(gca, 'LineWidth', 1.5);
 set(gca, 'TickDir', 'out');
 set(gca, 'TickLength', [0.02 0.02]);
-set(gca, 'FontSize', 12);
+set(gca, 'FontSize', 16);
 
 % Add grid but keep it subtle
 grid on;
@@ -423,6 +425,126 @@ set(gca, 'LineWidth', 1.5);
 set(gcf, 'Units', 'inches');
 pos = get(gcf, 'Position');
 set(gcf, 'Position', [pos(1), pos(2), 8, 6]);
-% baseDir = pwd;
-% fileName = 'Velocity_Field_With_Transparent_Final_Positions';
-% savefigures(baseDir, fileName);
+baseDir = pwd;
+fileName = 'final_pos_quiver';
+savefigures(baseDir, fileName);
+%%
+%% Simple Velocity Distribution Histogram
+% Remove invalid speeds
+valid_speeds = mean_speeds(isfinite(mean_speeds) & mean_speeds > 0);
+
+% Create figure
+figure('Position', [100, 100, 900, 700], 'Color', 'w');
+set(gcf, 'PaperPositionMode', 'auto');
+set(0, 'defaultTextInterpreter', 'latex');
+set(0, 'defaultAxesTickLabelInterpreter', 'latex');
+
+% Create histogram with proper PDF normalization
+num_bins = round(sqrt(length(valid_speeds)));
+[counts, bin_edges] = histcounts(valid_speeds, num_bins);
+bin_centers = (bin_edges(1:end-1) + bin_edges(2:end)) / 2;
+bin_width = bin_edges(2) - bin_edges(1);
+pdf_values = counts / (length(valid_speeds) * bin_width);
+
+% Plot histogram
+bar(bin_centers, pdf_values, 'FaceColor', [0.2 0.4 0.8], 'EdgeColor', 'k');
+
+% Labels
+xlabel('$\mathrm{Velocity\ (\mu m/s)}$', 'FontSize', 14);
+ylabel('$\mathrm{Probability\ Density}$', 'FontSize', 14);
+
+grid on;
+box on;
+grid on;
+set(gca, 'GridLineStyle', ':');
+set(gca, 'GridAlpha', 0.3);
+set(gca, 'LineWidth', 1.5);
+set(gca, 'TickDir', 'out');
+set(gca, 'TickLength', [0.02 0.02]);
+set(gca, 'FontSize', 16);
+box on;
+
+% Set figure size
+set(gcf, 'Units', 'inches');
+pos = get(gcf, 'Position');
+set(gcf, 'Position', [pos(1), pos(2), 8, 6]);
+baseDir = pwd;
+fileName = 'vel_histo';
+savefigures(baseDir, fileName);
+%%
+%% INTERACTIVE CENTER SELECTION AND RADIAL ANALYSIS
+
+% Step 1: Show particle positions and let user click center
+figure('Position', [100, 100, 900, 700], 'Color', 'w');
+set(gcf, 'PaperPositionMode', 'auto');
+set(0, 'defaultTextInterpreter', 'latex');
+set(0, 'defaultAxesTickLabelInterpreter', 'latex');
+
+% Plot all final positions
+scatter(final_positions_x, final_positions_y, 40, 'b', 'filled', 'MarkerFaceAlpha', 0.7);
+
+xlabel('$\mathrm{X\ (\mu m)}$', 'FontSize', 14);
+ylabel('$\mathrm{Y\ (\mu m)}$', 'FontSize', 14);
+title('$\mathrm{Click\ on\ the\ Center\ of\ the\ Cluster}$', 'FontSize', 16);
+
+grid on;
+set(gca, 'GridLineStyle', ':');
+set(gca, 'GridAlpha', 0.3);
+set(gca, 'LineWidth', 1.5);
+set(gca, 'TickDir', 'out');
+set(gca, 'TickLength', [0.02 0.02]);
+set(gca, 'FontSize', 16);
+box on;
+fileName = 'final_pos';
+axis([x_min-margin, x_max+margin, y_min-margin, y_max+margin]);
+set(gcf, 'Units', 'inches');
+pos = get(gcf, 'Position');
+set(gcf, 'Position', [pos(1), pos(2), 8, 6]);
+
+fprintf('Click on the center of the cluster...\n');
+[x_center, y_center] = ginput(1);
+
+% Mark the selected center
+hold on;
+scatter(x_center, y_center, 200, 'r', 'x', 'LineWidth', 4);
+scatter(x_center, y_center, 100, 'r', 'o', 'LineWidth', 3);
+
+fprintf('Center selected at: (%.1f, %.1f) μm\n', x_center, y_center);
+
+% Step 2: Calculate distances from selected center
+distances_from_center = sqrt((final_positions_x - x_center).^2 + (final_positions_y - y_center).^2);
+
+% Clean data (remove invalid speeds)
+valid_idx = isfinite(mean_speeds) & mean_speeds > 0;
+clean_distances = distances_from_center(valid_idx);
+clean_speeds = mean_speeds(valid_idx);
+baseDir = pwd;
+savefigures(baseDir, fileName);
+% Get user click
+% Step 3: Plot velocity vs distance
+figure('Position', [100, 100, 900, 700], 'Color', 'w');
+set(gcf, 'PaperPositionMode', 'auto');
+set(0, 'defaultTextInterpreter', 'latex');
+set(0, 'defaultAxesTickLabelInterpreter', 'latex');
+
+scatter(clean_distances, clean_speeds, 30, 'b', 'filled', 'MarkerFaceAlpha', 0.6);
+
+xlabel('$\mathrm{Distance\ from\ Selected\ Center\ (\mu m)}$', 'FontSize', 14);
+ylabel('$\mathrm{Mean\ Velocity\ (\mu m/s)}$', 'FontSize', 14);
+
+grid on;
+set(gca, 'GridLineStyle', ':');
+set(gca, 'GridAlpha', 0.3);
+set(gca, 'LineWidth', 1.5);
+set(gca, 'TickDir', 'out');
+set(gca, 'TickLength', [0.02 0.02]);
+set(gca, 'FontSize', 16);
+box on;
+
+% Set figure size
+set(gcf, 'Units', 'inches');
+pos = get(gcf, 'Position');
+set(gcf, 'Position', [pos(1), pos(2), 8, 6]);
+baseDir = pwd;
+fileName = 'vel_radial';
+savefigures(baseDir, fileName);

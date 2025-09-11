@@ -81,7 +81,6 @@
         positions = positions * calib;
         N_particles = size(positions, 1);
         
-        % Skip if too few particles
         if N_particles < 3
             continue;
         end
