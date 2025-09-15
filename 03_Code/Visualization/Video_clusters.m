@@ -18,7 +18,7 @@ sorted_data = sortrows(data, {'TRACK_ID', 'POSITION_T'});
 unique_tracks = unique(sorted_data.TRACK_ID);
 
 %% Extract trajectories
-min_track_length = 100;
+min_track_length = 10;
 X = {}; Y = {}; T = {};
 count = 0;
 

@@ -1,0 +1,28 @@
+# Data files (too large for git)
+*.csv
+*.tif
+*.tiff
+*.avi
+*.mp4
+*.mov
+
+# Raw data folder
+01_RawData/
+
+# Processed data (keep structure but not files)
+02_ProcessedData/*.mat
+02_ProcessedData/*.csv
+
+# Results (keep structure but not large files)
+04_Results/Videos/
+04_Results/Figures/*.png
+04_Results/Figures/*.jpg
+04_Results/Figures/*.eps
+
+# System files
+.DS_Store
+*/.DS_Store
+
+# MATLAB temporary files
+*.asv
+*.m~
