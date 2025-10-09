@@ -51,7 +51,6 @@ total_particles = [];
 connection_ratio = [];
 time_points = [];
 
-fprintf('Analyzing %d time points...\n', length(analysis_times));
 
 %% Main analysis loop
 for t_idx = 1:length(analysis_times)

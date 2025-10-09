@@ -135,7 +135,7 @@ for t_idx = 1:length(analysis_times)
     subplot(1, 2, 1);
     triplot(DT, 'Color', delaunay_color, 'LineWidth', 0.8);
     hold on;
-    scatter(positions(:,1), positions(:,2), 60, particle_color, 'filled', ...
+    scatter(positions(:,1), positions(:,2), 20, particle_color, 'filled', ...
         'MarkerFaceAlpha', 0.9, 'MarkerEdgeColor', 'white', 'MarkerEdgeAlpha', 0.8, 'LineWidth', 1);
     
     axis equal; 
