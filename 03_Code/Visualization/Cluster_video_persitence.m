@@ -6,13 +6,15 @@ if isequal(results_file, 0), return; end
 fprintf('Loading saved results: %s\n', results_file);
 load(fullfile(results_path, results_file));
 
-% Check if particle_history exists
 if ~exist('particle_history', 'var')
-    error('particle_history not found! Please re-run the persistence analysis with the updated code.');
+    error('particle_history not found! Please re-run the persistence analysis.');
 end
 
 fprintf('  particle_history loaded: %d particles\n', length(particle_history));
 fprintf('  Analysis frames: %d\n', length(analysis_times));
+if exist('cluster_nucleation_time', 'var') && ~isnan(cluster_nucleation_time)
+    fprintf('  Cluster nucleation at time: %.0f\n', cluster_nucleation_time);
+end
 
 %% Load particle positions
 csv_file = strrep(results_file, '_persistence_results.mat', '.csv');
@@ -27,12 +29,8 @@ end
 %% Quick data reload
 fprintf('Loading CSV data...\n');
 data = readtable(csv_full_path);
-data = data(4:end,:); % Remove TrackMate headers
-% data = data(4:end,:);
-% Convert frame numbers to seconds
-fps = 5;
-% fprintf('Converting POSITION_T from frames to seconds (fps = %d)...\n', fps);
-data.POSITION_T = data.POSITION_T / fps;if iscell(data.TRACK_ID), data.TRACK_ID = cellfun(@str2double, data.TRACK_ID); end
+data = data(4:end,:);
+if iscell(data.TRACK_ID), data.TRACK_ID = cellfun(@str2double, data.TRACK_ID); end
 if iscell(data.POSITION_X), data.POSITION_X = cellfun(@str2double, data.POSITION_X); end
 if iscell(data.POSITION_Y), data.POSITION_Y = cellfun(@str2double, data.POSITION_Y); end
 if iscell(data.POSITION_T), data.POSITION_T = cellfun(@str2double, data.POSITION_T); end
@@ -54,6 +52,7 @@ fprintf('  Loaded %d trajectories\n', length(X));
 
 %% Animation setup
 colors = [0.7,0.7,0.7; 0.2,0.4,0.8; 0.9,0.2,0.2]; % Gray, Blue, Red
+cluster_color = [1, 0.8, 0];  % Yellow for cluster highlight
 
 % Get spatial limits
 all_x = []; all_y = [];
@@ -66,13 +65,13 @@ video_file = strrep(results_file, '_persistence_results.mat', '_animation.mp4');
 v = VideoWriter(fullfile(results_path, video_file), 'MPEG-4');
 v.FrameRate = 8;
 open(v);
-fig = figure('Position', [100, 100, 800, 600], 'Color', 'white');
+fig = figure('Position', [100, 100, 1000, 700], 'Color', 'white');
 
 fprintf('\nGenerating animation...\n');
 
 %% Main animation loop
 frame_count = 0;
-for t_idx = 1:10:length(analysis_times)  % Every 2nd frame for speed
+for t_idx = 1:2:length(analysis_times)
     current_time = analysis_times(t_idx);
     
     % Get particles at this time
@@ -88,35 +87,30 @@ for t_idx = 1:10:length(analysis_times)  % Every 2nd frame for speed
     
     if size(positions,1) < 2, continue; end
     
-    %% Determine particle states from particle_history
-    particle_colors = repmat(colors(1,:), size(positions,1), 1); % Default: gray (disconnected)
+    %% Determine particle states
+    particle_colors = repmat(colors(1,:), size(positions,1), 1);
     stable_count = 0;
     transient_count = 0;
     
     for j = 1:length(present_particles)
         particle_idx = present_particles(j);
         
-        % Is this particle currently connected?
         if particle_history{particle_idx}(t_idx) == 1
             
-            % Check persistence: count actual connected frames with tolerance
+            % Check persistence
             connected_count = 0;
             current_gap = 0;
             
-            % Look backwards from current time
             for k = t_idx:-1:1
                 if particle_history{particle_idx}(k) == 1
-                    % Particle was connected
                     connected_count = connected_count + 1;
                     current_gap = 0;
                 elseif particle_history{particle_idx}(k) == 0
-                    % Particle was present but not connected - gap
                     current_gap = current_gap + 1;
                     if current_gap > tolerance_frames
                         break;
                     end
                 elseif particle_history{particle_idx}(k) == -1
-                    % Particle was not present - gap
                     current_gap = current_gap + 1;
                     if current_gap > tolerance_frames
                         break;
@@ -124,7 +118,7 @@ for t_idx = 1:10:length(analysis_times)  % Every 2nd frame for speed
                 end
             end
             
-            % Assign color based on persistence
+            % Assign color
             if connected_count >= persistence_frames
                 particle_colors(j,:) = colors(3,:); % Red = stable
                 stable_count = stable_count + 1;
@@ -135,13 +129,47 @@ for t_idx = 1:10:length(analysis_times)  % Every 2nd frame for speed
         end
     end
     
-    % Calculate distances for connection lines
+    % Check if particles belong to cluster
+    in_cluster = false(size(positions,1), 1);
+    cluster_hull_x = [];
+    cluster_hull_y = [];
+    
+    if exist('cluster_particle_ids', 'var') && ~isempty(cluster_particle_ids{t_idx})
+        cluster_ids = cluster_particle_ids{t_idx};
+        
+        for j = 1:length(present_particles)
+            if ismember(present_particles(j), cluster_ids)
+                in_cluster(j) = true;
+            end
+        end
+        
+        % Get cluster hull for visualization
+        cluster_pos_idx = find(in_cluster);
+        if length(cluster_pos_idx) >= 3
+            try
+                cluster_positions = positions(cluster_pos_idx, :);
+                [k, ~] = convhull(cluster_positions(:,1), cluster_positions(:,2));
+                cluster_hull_x = cluster_positions(k, 1);
+                cluster_hull_y = cluster_positions(k, 2);
+            catch
+            end
+        end
+    end
+    
+    % Calculate distances for lines
     distances = pdist(positions);
     distance_matrix = squareform(distances);
     
     clf;
     
-    % Draw connection lines first (background)
+    % Draw cluster boundary if it exists
+    if ~isempty(cluster_hull_x) && cluster_fixed(t_idx) == 1
+        fill(cluster_hull_x, cluster_hull_y, cluster_color, ...
+            'FaceAlpha', 0.2, 'EdgeColor', cluster_color, 'LineWidth', 2);
+        hold on;
+    end
+    
+    % Draw connection lines
     for i = 1:size(positions,1)
         for j = i+1:size(positions,1)
             if distance_matrix(i,j) <= distance_threshold
@@ -152,10 +180,17 @@ for t_idx = 1:10:length(analysis_times)  % Every 2nd frame for speed
         end
     end
     
-    % Draw particles on top
+    % Draw particles
     for i = 1:size(positions,1)
-        scatter(positions(i,1), positions(i,2), 60, particle_colors(i,:), 'filled', ...
-            'MarkerFaceAlpha', 0.9, 'MarkerEdgeColor', 'white', 'LineWidth', 1);
+        if in_cluster(i) && cluster_fixed(t_idx) == 1
+            % Cluster particles: thicker border
+            scatter(positions(i,1), positions(i,2), 80, particle_colors(i,:), 'filled', ...
+                'MarkerFaceAlpha', 1.0, 'MarkerEdgeColor', cluster_color, 'LineWidth', 2.5);
+        else
+            % Normal particles
+            scatter(positions(i,1), positions(i,2), 60, particle_colors(i,:), 'filled', ...
+                'MarkerFaceAlpha', 0.9, 'MarkerEdgeColor', 'white', 'LineWidth', 1);
+        end
         hold on;
     end
     
@@ -163,15 +198,34 @@ for t_idx = 1:10:length(analysis_times)  % Every 2nd frame for speed
     axis equal; xlim(xlims); ylim(ylims); grid on;
     xlabel('X Position (\mum)', 'FontSize', 11);
     ylabel('Y Position (\mum)', 'FontSize', 11);
-    title(sprintf('Time: %.0f | Stable: %d | Transient: %d | Disconnected: %d', ...
+    
+    % Title with cluster info
+    if cluster_exists(t_idx) == 1
+        if cluster_fixed(t_idx) == 1
+            cluster_status = sprintf('FIXED CLUSTER: %d particles, %.1f µm²', ...
+                cluster_size(t_idx), cluster_area(t_idx));
+        else
+            cluster_status = sprintf('Cluster forming: %d particles', cluster_size(t_idx));
+        end
+    else
+        cluster_status = 'No cluster detected';
+    end
+    
+    title({sprintf('Time: %.0f | Stable: %d | Transient: %d | Disconnected: %d', ...
         current_time, stable_count, transient_count, ...
-        size(positions,1)-(stable_count+transient_count)), 'FontSize', 12);
+        size(positions,1)-(stable_count+transient_count)), cluster_status}, 'FontSize', 11);
     
     % Legend
     h1 = scatter(NaN,NaN,60,colors(3,:),'filled','MarkerEdgeColor','white','LineWidth',1);
     h2 = scatter(NaN,NaN,60,colors(2,:),'filled','MarkerEdgeColor','white','LineWidth',1);
     h3 = scatter(NaN,NaN,60,colors(1,:),'filled','MarkerEdgeColor','white','LineWidth',1);
-    legend([h1,h2,h3], {'Stable','Transient','Disconnected'}, 'Location','northeast');
+    if any(cluster_fixed)
+        h4 = scatter(NaN,NaN,80,colors(3,:),'filled','MarkerEdgeColor',cluster_color,'LineWidth',2.5);
+        legend([h1,h2,h3,h4], {'Stable','Transient','Disconnected','In Cluster'}, ...
+            'Location','northeast');
+    else
+        legend([h1,h2,h3], {'Stable','Transient','Disconnected'}, 'Location','northeast');
+    end
     
     drawnow;
     writeVideo(v, getframe(fig));

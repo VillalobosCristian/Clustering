@@ -1,11 +1,16 @@
- clear all; clc; close all;
+clear all; clc; close all;
 
 [file_name, path_name] = uigetfile('*.csv', 'Select CSV file');
 if isequal(file_name, 0), return; end
 
 data = readtable(fullfile(path_name, file_name));
 data = data(4:end,:); % Remove TrackMate headers
-
+% data = data(4:end,:); % Remove TrackMate headers
+% data = data(4:end,:);
+% Convert frame numbers to seconds
+fps = 5;
+% fprintf('Converting POSITION_T from frames to seconds (fps = %d)...\n', fps);
+data.POSITION_T = data.POSITION_T / fps;
 % Convert to numeric if needed
 if iscell(data.TRACK_ID), data.TRACK_ID = cellfun(@str2double, data.TRACK_ID); end
 if iscell(data.POSITION_X), data.POSITION_X = cellfun(@str2double, data.POSITION_X); end
@@ -16,8 +21,8 @@ if iscell(data.POSITION_T), data.POSITION_T = cellfun(@str2double, data.POSITION
 sorted_data = sortrows(data, {'TRACK_ID', 'POSITION_T'});
 unique_tracks = unique(sorted_data.TRACK_ID);
 
-%% Extract trajectories (same as before)
-min_track_length = 10;
+%% Extract trajectories 
+min_track_length = 100;
 X = {}; Y = {}; T = {};
 count = 0;
 
@@ -83,8 +88,8 @@ for t_idx = 1:length(analysis_times)
         continue; % Skip if not enough particles
     end
     
-    % Calculate pairwise distances 
-    distances = pdist(positions);  %instead of using sqrt for
+    % Calculate pairwise distances (pdist already computes Euclidean distances)
+    distances = pdist(positions);
     distance_matrix = squareform(distances);  
     
     %  Check connections and record for each individual particle
@@ -188,38 +193,34 @@ for t_idx = 1:length(analysis_times)
         % Is this particle currently connected?
         if particle_history{particle_idx}(t_idx) == 1 %yes
             
-     % Check persistence: count consecutive connected frames with tolerance
-            consecutive_frames = 0;
-            gap_count = 0;
+            % Check persistence: count actual connected frames with tolerance
+            connected_count = 0;
+            current_gap = 0;
             
             % Look backwards from current time
-            for k = t_idx:-1:1 % t inverse
+            for k = t_idx:-1:1
                 if particle_history{particle_idx}(k) == 1
-                    consecutive_frames = consecutive_frames + 1;
-                    gap_count = 0;  % Reset gap counter when connected
+                    % Particle was connected
+                    connected_count = connected_count + 1;
+                    current_gap = 0;  % Reset gap counter
                 elseif particle_history{particle_idx}(k) == 0
                     % Particle was present but not connected - this is a gap
-                    gap_count = gap_count + 1;
-                    if gap_count <= tolerance_frames
-                        % Still within tolerance - keep counting overall frames
-                        consecutive_frames = consecutive_frames + 1;
-                    else
+                    current_gap = current_gap + 1;
+                    if current_gap > tolerance_frames
                         % Too many consecutive gaps - break the sequence
                         break;
                     end
                 elseif particle_history{particle_idx}(k) == -1
                     % Particle was not present - this is also a gap
-                    gap_count = gap_count + 1;
-                    if gap_count <= tolerance_frames
-                        consecutive_frames = consecutive_frames + 1;
-                    else
+                    current_gap = current_gap + 1;
+                    if current_gap > tolerance_frames
                         break;
                     end
                 end
             end
             
             % Classify based on persistence
-            if consecutive_frames >= persistence_frames
+            if connected_count >= persistence_frames
                 stable_count = stable_count + 1;
             else
                 transient_count = transient_count + 1;
@@ -272,9 +273,14 @@ ylabel('Stability Index (%)', 'FontSize', 12);
 title('Stability Index (Stable/Connected)');
 ylim([0 100]);
 grid on; box on;
+
 %%
-% Save results 
+% Save results - NOW INCLUDING particle_history and analysis_times
 results_file = [file_name(1:end-4), '_persistence_results.mat'];
 save(fullfile(path_name, results_file), 'time_points', 'stable_particles_over_time', ...
      'transient_particles_over_time', 'connection_ratio', 'stable_ratio', 'transient_ratio', ...
-     'persistence_frames', 'tolerance_frames', 'distance_threshold');
+     'persistence_frames', 'tolerance_frames', 'distance_threshold', ...
+     'particle_history', 'analysis_times');
+
+fprintf('\nResults saved to: %s\n', results_file);
+fprintf('particle_history has been saved for animation!\n');

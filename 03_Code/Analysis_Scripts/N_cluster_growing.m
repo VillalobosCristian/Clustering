@@ -5,7 +5,11 @@ if isequal(file_name, 0), return; end
 
 data = readtable(fullfile(path_name, file_name));
 data = data(4:end,:); % Remove TrackMate headers
-
+% data = data(4:end,:);
+% Convert frame numbers to seconds
+fps = 5;
+% fprintf('Converting POSITION_T from frames to seconds (fps = %d)...\n', fps);
+data.POSITION_T = data.POSITION_T / fps;
 % Convert to numeric if needed
 if iscell(data.TRACK_ID), data.TRACK_ID = cellfun(@str2double, data.TRACK_ID); end
 if iscell(data.POSITION_X), data.POSITION_X = cellfun(@str2double, data.POSITION_X); end
@@ -100,45 +104,56 @@ end
 %% Create publication-quality plot
 figure('Position', [100, 100, 1200, 400], 'Color', 'w');
 
+
+% figure('Position', [100, 100, 900, 700], 'Color', 'w');
+set(0, 'defaultTextInterpreter', 'latex');
+set(0, 'defaultAxesTickLabelInterpreter', 'latex');
+
 % Plot 1: Number of connected particles over time
-subplot(1, 3, 1);
+subplot(1, 2, 1);
 plot(time_points, connected_particles, 'b-', 'LineWidth', 2);
 hold on;
 plot(time_points, total_particles, 'k--', 'LineWidth', 1.5, 'Color', [0.5 0.5 0.5]);
-xlabel('Time', 'FontSize', 12);
-ylabel('Number of Particles', 'FontSize', 12);
+xlabel('Time', 'FontSize', 16);
+ylabel('Number of Particles', 'FontSize', 16);
 legend({'Connected Particles', 'Total Particles'}, 'Location', 'best');
 grid on; box on;
 
 % Plot 2: Connection ratio over time
-subplot(1, 3, 2);
+subplot(1, 2, 2);
+set(0, 'defaultAxesTickLabelInterpreter', 'latex');
+set(0, 'defaultTextInterpreter', 'latex');
+
 plot(time_points, connection_ratio * 100, 'r-', 'LineWidth', 2);
-xlabel('Time', 'FontSize', 12);
-ylabel('Connected Particles (%)', 'FontSize', 12);
+xlabel('Time', 'FontSize', 16);
+ylabel(' Percentage Connected Particles', 'FontSize', 16);
 ylim([0 100]);
 grid on; box on;
 
-subplot(1, 3, 3);
-if length(connection_ratio) > 5
-    % Calculate smoothed derivative
-    smooth_ratio = smoothdata(connection_ratio, 'gaussian', 5);
-    assembly_rate = gradient(smooth_ratio, time_points);
-    plot(time_points, assembly_rate, 'g-', 'LineWidth', 2);
-    xlabel('Time', 'FontSize', 12);
-    ylabel('Assembly Rate (% / time)', 'FontSize', 12);
-    grid on; box on;
-else
-    text(0.5, 0.5, 'Insufficient data\nfor rate calculation', ...
-        'HorizontalAlignment', 'center', 'FontSize', 12);
-end
+baseDir = pwd;
+fileName = 'Cluster_grow';
+savefigures(baseDir, fileName);
+% subplot(1, 2, 3);
+% if length(connection_ratio) > 5
+%     % Calculate smoothed derivative
+%     smooth_ratio = smoothdata(connection_ratio, 'gaussian', 5);
+%     assembly_rate = gradient(smooth_ratio, time_points);
+%     plot(time_points, assembly_rate, 'g-', 'LineWidth', 2);
+%     xlabel('Time', 'FontSize', 12);
+%     ylabel('Assembly Rate (% / time)', 'FontSize', 12);
+%     grid on; box on;
+% else
+%     text(0.5, 0.5, 'Insufficient data\nfor rate calculation', ...
+%         'HorizontalAlignment', 'center', 'FontSize', 12);
+% end
 
 
-
-% Find assembly phases
-if length(connection_ratio) > 10
-    initial_ratio = mean(connection_ratio(1:3));
-    final_ratio = mean(connection_ratio(end-2:end));
-    fprintf('Assembly efficiency: %.1f%% → %.1f%% (Δ = %.1f%%)\n', ...
-        initial_ratio*100, final_ratio*100, (final_ratio-initial_ratio)*100);
-end
+% 
+% % Find assembly phases
+% if length(connection_ratio) > 10
+%     initial_ratio = mean(connection_ratio(1:3));
+%     final_ratio = mean(connection_ratio(end-2:end));
+%     fprintf('Assembly efficiency: %.1f%% → %.1f%% (Δ = %.1f%%)\n', ...
+%         initial_ratio*100, final_ratio*100, (final_ratio-initial_ratio)*100);
+% end
 
