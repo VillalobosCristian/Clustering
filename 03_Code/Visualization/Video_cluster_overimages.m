@@ -78,11 +78,11 @@ for i = 1:length(T)
 end
 unique_times = unique(all_times);
 
-time_step = 5; 
+time_step = 1; 
 analysis_times = unique_times(1:time_step:end);
 
 %% Parameters
-calib = 16.7; % 16.7 pixels per micrometer - convert from μm to pixels
+calib = 15.5; % 16.7 pixels per micrometer - convert from μm to pixels
 distance_threshold = 3; % Keep threshold in μm for analysis
 
 all_x = []; all_y = [];

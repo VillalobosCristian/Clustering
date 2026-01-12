@@ -54,7 +54,7 @@ close all
         % Get data for this specific track
         track_data = sorted_data(sorted_data.TRACK_ID == unique_tracks(i), :);
         
-        if height(track_data) < 100
+        if height(track_data) < 1
             continue;
         end
         

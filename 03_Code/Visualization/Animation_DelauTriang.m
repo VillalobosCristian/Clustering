@@ -1,348 +1,397 @@
-%% SIMPLE ANIMATED TRIANGULATION (Fixed for duplicates)
-fprintf('Starting triangulation animation...\n');
+clear all; clc; close all;
 
-% Create figure
-figure('Position', [100 100 800 600]);
+%% Load CSV data
+[file_name, path_name] = uigetfile('*.csv', 'Select CSV file');
+if isequal(file_name, 0), return; end
+data = readtable(fullfile(path_name, file_name));
+data = data(4:end,:); % Remove TrackMate headers
 
-% Loop through every 5th time point
-for t = 1:50:length(unique_times)
-    current_time = unique_times(t);
-    
-    % Get all particle positions at this time
-    pos_x = [];
-    pos_y = [];
-    
+% Convert to numeric if needed
+if iscell(data.TRACK_ID), data.TRACK_ID = cellfun(@str2double, data.TRACK_ID); end
+if iscell(data.POSITION_X), data.POSITION_X = cellfun(@str2double, data.POSITION_X); end
+if iscell(data.POSITION_Y), data.POSITION_Y = cellfun(@str2double, data.POSITION_Y); end
+if iscell(data.POSITION_T), data.POSITION_T = cellfun(@str2double, data.POSITION_T); end
 
-    for i = 1:num_tracks
-        [~, time_idx] = min(abs(T{i} - current_time));
-        pos_x = [pos_x; X{i}(time_idx)];
-        pos_y = [pos_y; Y{i}(time_idx)];
+sorted_data = sortrows(data, {'TRACK_ID', 'POSITION_T'});
+unique_tracks = unique(sorted_data.TRACK_ID);
+
+%% Extract trajectories
+min_track_length = 100;
+X = {}; Y = {}; T = {};
+count = 0;
+for i = 1:length(unique_tracks)
+    track_data = sorted_data(sorted_data.TRACK_ID == unique_tracks(i), :);
+    if height(track_data) >= min_track_length
+        count = count + 1;
+        X{count} = track_data.POSITION_X;
+        Y{count} = track_data.POSITION_Y;
+        T{count} = track_data.POSITION_T;
     end
-    
-    % Remove duplicate positions
-    positions = [pos_x, pos_y];
-    [unique_positions, ~] = unique(positions, 'rows');
-    pos_x = unique_positions(:, 1);
-    pos_y = unique_positions(:, 2);
-    
-    % Make triangulation
-    DT = delaunayTriangulation(pos_x, pos_y);
-    triangles = DT.ConnectivityList;
-    
-    % Clear and redraw
-    clf;
-    hold on;
-    
-    % Draw triangles
-    for tri = 1:size(triangles, 1)
-        triangle_x = pos_x(triangles(tri, [1,2,3,1]));
-        triangle_y = pos_y(triangles(tri, [1,2,3,1]));
-        plot(triangle_x, triangle_y, 'b-', 'LineWidth', 0.8);
-    end
-    
-    % Draw particles
-    scatter(pos_x, pos_y, 50, 'red', 'filled');
-    
-    title(sprintf('Time = %.0f (%d particles, %d triangles)', ...
-          current_time, length(pos_x), size(triangles,1)));
-    axis equal;
-    grid on;
-    
-    pause(0.2);
-    
-    fprintf('t = %.0f (%d unique particles)\n', current_time, length(pos_x));
 end
 
-fprintf('Animation complete!\n');
-%%
-%% SIMPLE TRAJECTORY ANIMATION
-fprintf('Creating trajectory animation...\n');
-
-% Find time range
+%% Find actual time values in the data
 all_times = [];
-for i = 1:num_tracks
+for i = 1:length(T)
     all_times = [all_times; T{i}];
 end
-time_min = min(all_times);
-time_max = max(all_times);
+unique_times = unique(all_times);
+unique_times = sort(unique_times);
 
-fprintf('Time range: %.1f to %.1f\n', time_min, time_max);
+fprintf('Found %d unique time points\n', length(unique_times));
+fprintf('Time range: %.1f to %.1f\n', min(unique_times), max(unique_times));
 
-% Create time vector for animation
-num_frames = 10; % Number of animation frames
-time_vector = linspace(time_min, time_max, num_frames);
+% Use actual times from data instead of assuming they start at 1
+timeStep = 10; % Process every 10th time point
+time_indices = 1:timeStep:length(unique_times);
+selected_times = unique_times(time_indices);
 
-% Create figure
-figure('Position', [100 100 800 600]);
+fprintf('Will process %d time points\n', length(selected_times));
 
-% Animation loop
-for frame = 1:num_frames
-    current_time = time_vector(frame);
+%% Video parameters
+calib = 1.0;           % Calibration factor (μm/pixel)
+particle_radius = 0.5; % Particle radius in μm (ADJUST THIS FOR YOUR PARTICLES!)
+frameRate = 10;        % frames per second for the output video
+
+% Create video writer object
+outputVideo = VideoWriter('local_density_evolution.mp4', 'MPEG-4');
+outputVideo.FrameRate = frameRate;
+outputVideo.Quality = 100;
+open(outputVideo);
+
+% Create figure for video frames
+fig = figure('Position', [100, 100, 800, 600], 'Color', 'white');
+
+%% Find global position limits across all time points for consistent scaling
+fprintf('Finding global position limits...\n');
+allPositions = [];
+for t = selected_times'
+    positions_temp = [];
+    for i = 1:length(X)
+        % Use tolerance for floating point comparison
+        timeIdx = find(abs(T{i} - t) < 0.01, 1);
+        if ~isempty(timeIdx)
+            positions_temp = [positions_temp; X{i}(timeIdx), Y{i}(timeIdx)];
+        end
+    end
+    if ~isempty(positions_temp)
+        allPositions = [allPositions; positions_temp];
+    end
+end
+
+% Check if we found any positions
+if isempty(allPositions)
+    error('No particle positions found! Check that time values match between tracks.');
+end
+
+allPositions = allPositions * calib;
+
+% Calculate global limits for consistent view
+xMin_global = min(allPositions(:,1)); 
+xMax_global = max(allPositions(:,1));
+yMin_global = min(allPositions(:,2)); 
+yMax_global = max(allPositions(:,2));
+padding = 0.08 * max(xMax_global - xMin_global, yMax_global - yMin_global);
+xLimits = [xMin_global - padding, xMax_global + padding];
+yLimits = [yMin_global - padding, yMax_global + padding];
+
+fprintf('Position limits: X=[%.1f, %.1f], Y=[%.1f, %.1f]\n', ...
+        xLimits(1), xLimits(2), yLimits(1), yLimits(2));
+
+% Calculate reference area for close-packed 2D hexagonal lattice
+a = particle_radius;
+A_ocp = 2 * sqrt(3) * a^2;
+phi_ocp = pi / (2*sqrt(3));
+
+fprintf('\nParticle radius: %.2f μm\n', a);
+fprintf('Close-packed reference area A_ocp: %.3f μm²\n', A_ocp);
+fprintf('Close-packing fraction φ_ocp: %.3f\n', phi_ocp);
+
+%% Main loop to create video frames
+fprintf('\nCreating video frames...\n');
+totalFrames = length(selected_times);
+frameCount = 0;
+
+% Storage for time evolution data
+time_array = [];
+rho_avg_array = [];
+rho_std_array = [];
+N_particles_array = [];
+
+for targetTime = selected_times'
+    frameCount = frameCount + 1;
     
-    clf; % Clear figure
+    % Clear the current figure
+    clf(fig);
+    
+    % Extract positions at current time
+    positions = [];
+    for i = 1:length(X)
+        % Use tolerance for floating point comparison
+        timeIdx = find(abs(T{i} - targetTime) < 0.01, 1);
+        if ~isempty(timeIdx)
+            positions = [positions; X{i}(timeIdx), Y{i}(timeIdx)];
+        end
+    end
+    positions = positions * calib;
+    
+    % Skip if not enough particles at this time
+    if isempty(positions) || size(positions,1) < 4
+        fprintf('Skipping time %.1f: only %d particles\n', targetTime, size(positions,1));
+        continue;
+    end
+    
+    %% Calculate local density parameter using Voronoi tessellation
+    N = size(positions,1);
+    
+    % Compute Voronoi tessellation
+    try
+        [V, C] = voronoin(positions);
+    catch ME
+        fprintf('Voronoi failed at time %.1f: %s\n', targetTime, ME.message);
+        continue;
+    end
+    
+    % Initialize the density parameter array
+    rho = zeros(N,1);
+    valid_particles = false(N,1);
+    
+    % Calculate a reasonable boundary for filtering
+    if N >= 3
+        try
+            hull_indices = convhull(positions(:,1), positions(:,2));
+            hull_points = positions(hull_indices, :);
+        catch
+            % If convhull fails, use all points
+            hull_points = positions;
+        end
+    else
+        hull_points = positions;
+    end
+    
+    center_x = mean(positions(:,1));
+    center_y = mean(positions(:,2));
+    
+    % Maximum reasonable distance for a Voronoi vertex
+    max_distance = 2 * max(xMax_global - xMin_global, yMax_global - yMin_global);
+    
+    % Calculate ρ for each particle
+    for i = 1:N
+        vertices = C{i};
+        
+        % Skip cells with infinite vertices (indicated by vertex index 1)
+        if any(vertices == 1)
+            rho(i) = NaN;
+            continue;
+        end
+        
+        % Get the coordinates of this cell's vertices
+        cell_x = V(vertices, 1);
+        cell_y = V(vertices, 2);
+        
+        % Check if all vertices are within reasonable bounds
+        distances = sqrt((cell_x - center_x).^2 + (cell_y - center_y).^2);
+        
+        if all(distances < max_distance) && length(vertices) >= 3
+            % Calculate Voronoi cell area
+            A_j = polyarea(cell_x, cell_y);
+            
+            % Only accept positive, finite areas
+            if A_j > 0 && isfinite(A_j)
+                % Local density parameter: ρⱼ = A_ocp / Aⱼ
+                rho(i) = A_ocp / A_j;
+                valid_particles(i) = true;
+            else
+                rho(i) = NaN;
+            end
+        else
+            rho(i) = NaN;
+        end
+    end
+    
+    % Filter out invalid particles for statistics and plotting
+    valid_rho = rho(valid_particles);
+    valid_positions = positions(valid_particles, :);
+    
+    if isempty(valid_rho)
+        fprintf('No valid particles at time %.1f\n', targetTime);
+        continue;
+    end
+    
+    % Store time evolution data
+    time_array = [time_array; targetTime];
+    rho_avg_array = [rho_avg_array; mean(valid_rho)];
+    rho_std_array = [rho_std_array; std(valid_rho)];
+    N_particles_array = [N_particles_array; length(valid_rho)];
+    
+    %% Create the visualization
+    % Scatter plot colored by ρ
+    scatter(valid_positions(:,1), valid_positions(:,2), 60, valid_rho, 'filled', ...
+        'MarkerEdgeColor', [0.2, 0.2, 0.2], 'LineWidth', 0.8, ...
+        'MarkerFaceAlpha', 1);
+    
+    % Set consistent axes limits
+    axis equal;
+    xlim(xLimits);
+    ylim(yLimits);
+    
+    % Add bounded Voronoi cells
     hold on;
     
-    % For each trajectory, plot up to current time
-    for i = 1:min(50, num_tracks) % Show first 50 trajectories to avoid clutter
+    % Expand the hull slightly for boundary
+    if size(hull_points, 1) > 2
+        expanded_hull = zeros(size(hull_points));
+        expansion_factor = 1.1;
         
-        % Find points up to current time
-        time_mask = T{i} <= current_time;
+        for i = 1:size(hull_points, 1)
+            dx = hull_points(i, 1) - center_x;
+            dy = hull_points(i, 2) - center_y;
+            expanded_hull(i, 1) = center_x + dx * expansion_factor;
+            expanded_hull(i, 2) = center_y + dy * expansion_factor;
+        end
+    else
+        expanded_hull = hull_points;
+    end
+    
+    % Plot each Voronoi cell with clipping
+    for k = 1:length(C)
+        vertices = C{k};
         
-        if sum(time_mask) > 0
-            % Plot trajectory path up to current time
-            plot(X{i}(time_mask), Y{i}(time_mask), 'b-', 'LineWidth', 1, 'Color', [0.5 0.5 0.8]);
+        % Skip cells with infinite vertices
+        if any(vertices == 1)
+            continue;
+        end
+        
+        % Get the coordinates of this cell's vertices
+        cell_x = V(vertices, 1);
+        cell_y = V(vertices, 2);
+        
+        % Check if all vertices are within reasonable bounds
+        distances = sqrt((cell_x - center_x).^2 + (cell_y - center_y).^2);
+        
+        if all(distances < max_distance) && length(vertices) >= 3
+            % Check if the cell is inside or near the expanded hull
+            in_region = false;
+            for v = 1:length(vertices)
+                if inpolygon(cell_x(v), cell_y(v), expanded_hull(:,1), expanded_hull(:,2))
+                    in_region = true;
+                    break;
+                end
+            end
             
-            % Plot current particle position
-            if sum(time_mask) > 0
-                current_x = X{i}(time_mask);
-                current_y = Y{i}(time_mask);
-                scatter(current_x(end), current_y(end), 40, 'red', 'filled', 'MarkerEdgeColor', 'black');
+            % Only plot cells that are in the region of interest
+            if in_region
+                plot([cell_x; cell_x(1)], [cell_y; cell_y(1)], '-', ...
+                     'Color', [0.4, 0.4, 0.4, 0.6], 'LineWidth', 1);
             end
         end
     end
     
-    title(sprintf('Particle Trajectories - Time = %.1f', current_time));
-    xlabel('X position (pixels)');
-    ylabel('Y position (pixels)');
-    axis equal;
+    % Add reference lines for phase boundaries
+    rho_fluid_max = 0.70 / phi_ocp;    % ≈ 0.77
+    rho_hexatic_max = 0.72 / phi_ocp;  % ≈ 0.79
+    
+    hold off;
+    
+    % Colormap and color scale
+    colormap(hot);
+    caxis([0, 1.0]);
+    cb = colorbar;
+    cb.Label.String = '$\rho = A_{\mathrm{ocp}}/A$';
+    cb.Label.Interpreter = 'latex';
+    cb.Label.FontWeight = 'normal';
+    cb.Label.FontSize = 14;
+    cb.TickLabelInterpreter = 'latex';
+    
+    % Format the axes
+    ax = gca;
+    ax.FontName = 'Arial';
+    ax.FontSize = 16;
+    ax.LineWidth = 1;
+    ax.TickDir = 'out';
     grid on;
+    ax.GridAlpha = 0.1;
+    ax.TickLabelInterpreter = 'latex';
+    box on;
     
-    % Keep axis limits fixed
-    if frame == 1
-        axis_limits = axis;
+    % Labels and title
+    xlabel('$x \ (\mu\mathrm{m})$', 'FontSize', 18, 'Interpreter', 'latex');
+    ylabel('$y \ (\mu\mathrm{m})$', 'FontSize', 18, 'Interpreter', 'latex');
+    title_str = sprintf('Local Density $\\rho$ (t = %.1f) | $\\langle\\rho\\rangle = %.2f$', ...
+                        targetTime, mean(valid_rho));
+    title(title_str, 'FontSize', 16, 'Interpreter', 'latex');
+    
+    % Add phase info
+    phi_avg = mean(valid_rho) * phi_ocp;
+    if phi_avg < 0.70
+        phase_str = 'FLUID';
+        phase_color = [0, 0.7, 1];
+    elseif phi_avg >= 0.70 && phi_avg < 0.72
+        phase_str = 'HEXATIC';
+        phase_color = [1, 0.7, 0];
     else
-        axis(axis_limits);
+        phase_str = 'CRYSTAL';
+        phase_color = [1, 0.2, 0.2];
     end
     
-    pause(0.1); % Pause between frames
+    text(0.02, 0.98, sprintf('Phase: %s ($\\phi \\approx %.2f$)', phase_str, phi_avg), ...
+         'Units', 'normalized', 'FontSize', 14, 'Interpreter', 'latex', ...
+         'VerticalAlignment', 'top', 'BackgroundColor', [1 1 1 0.8], ...
+         'EdgeColor', phase_color, 'LineWidth', 2);
     
-    if mod(frame, 10) == 0
-        fprintf('Frame %d/%d (t = %.1f)\n', frame, num_frames, current_time);
+    % Capture the frame
+    drawnow;
+    frame = getframe(fig);
+    writeVideo(outputVideo, frame);
+    
+    % Display progress
+    if mod(frameCount, 10) == 0 || frameCount == totalFrames
+        fprintf('Frame %d/%d (t=%.1f, <ρ>=%.2f, N=%d)\n', ...
+                frameCount, totalFrames, targetTime, mean(valid_rho), length(valid_rho));
     end
 end
 
-fprintf('Animation complete!\n');
-%%
-%% TRAJECTORIES + TRIANGULATION ANIMATION
-fprintf('Creating trajectory + triangulation animation...\n');
+% Close the video file
+close(outputVideo);
+fprintf('\nVideo generation complete!\n');
+fprintf('Total frames processed: %d\n', frameCount);
+fprintf('Video saved as: local_density_evolution.mp4\n');
 
-% Find time range
-all_times = [];
-for i = 1:num_tracks
-    all_times = [all_times; T{i}];
-end
-time_min = min(all_times);
-time_max = max(all_times);
-
-fprintf('Time range: %.1f to %.1f\n', time_min, time_max);
-
-% Create time vector for animation
-num_frames = 100;
-time_vector = linspace(time_min, time_max, num_frames);
-
-% Decide which trajectories to show
-num_trajectories_to_show = min(50, num_tracks);
-fprintf('Showing %d trajectories\n', num_trajectories_to_show);
-
-% Create figure
-figure('Position', [100 100 800 600]);
-
-% Animation loop
-for frame = 1:num_frames
-    current_time = time_vector(frame);
+%% Create summary plot of time evolution
+if ~isempty(time_array)
+    figure('Position', [100, 100, 1000, 400], 'Color', 'white');
     
-    clf; % Clear figure
+    subplot(1,2,1)
+    errorbar(time_array, rho_avg_array, rho_std_array, 'o-', ...
+             'LineWidth', 2, 'MarkerSize', 6, 'MarkerFaceColor', 'auto');
     hold on;
-    
-    % Collect current positions of the particles we're showing
-    current_positions_x = [];
-    current_positions_y = [];
-    
-    % For each trajectory we're showing
-    for i = 1:num_trajectories_to_show
-        
-        % Find points up to current time
-        time_mask = T{i} <= current_time;
-        
-        if sum(time_mask) > 0
-            % Plot trajectory path up to current time
-            plot(X{i}(time_mask), Y{i}(time_mask), 'b-', 'LineWidth', 1, 'Color', [0.6 0.6 0.9]);
-            
-            % Get current particle position
-            current_x_traj = X{i}(time_mask);
-            current_y_traj = Y{i}(time_mask);
-            current_pos_x = current_x_traj(end);
-            current_pos_y = current_y_traj(end);
-            
-            % Store current position for triangulation
-            current_positions_x = [current_positions_x; current_pos_x];
-            current_positions_y = [current_positions_y; current_pos_y];
-        end
-    end
-    
-    % Create triangulation on current positions (if we have enough particles)
-    if length(current_positions_x) >= 3
-        % Remove any duplicate positions
-        positions = [current_positions_x, current_positions_y];
-        [unique_positions, ~] = unique(positions, 'rows');
-        triangulation_x = unique_positions(:, 1);
-        triangulation_y = unique_positions(:, 2);
-        
-        % Make triangulation
-        DT = delaunayTriangulation(triangulation_x, triangulation_y);
-        triangles = DT.ConnectivityList;
-        
-        % Draw triangles FIRST (so they appear behind particles)
-        for tri = 1:size(triangles, 1)
-            triangle_x = triangulation_x(triangles(tri, [1,2,3,1]));
-            triangle_y = triangulation_y(triangles(tri, [1,2,3,1]));
-            plot(triangle_x, triangle_y, 'k-', 'LineWidth', 0.5, 'Color', [0.3, 0.3, 0.3]);
-        end
-    end
-    
-    % Draw current particle positions ON TOP of triangles
-    if ~isempty(current_positions_x)
-        scatter(current_positions_x, current_positions_y, 60, 'red', 'filled', 'MarkerEdgeColor', 'black', 'LineWidth', 1);
-    end
-    
-    % Title and formatting
-    num_particles_shown = length(current_positions_x);
-    num_triangles_shown = 0;
-    if length(current_positions_x) >= 3
-        num_triangles_shown = size(triangles, 1);
-    end
-    
-    title(sprintf('Trajectories + Triangulation - Time = %.1f\n%d particles, %d triangles', ...
-          current_time, num_particles_shown, num_triangles_shown));
-    xlabel('X position (pixels)');
-    ylabel('Y position (pixels)');
-    axis equal;
+    yline(rho_fluid_max, '--', 'Color', 'cyan', 'LineWidth', 2, ...
+          'Label', 'Fluid/Hexatic', 'LabelHorizontalAlignment', 'left');
+    yline(rho_hexatic_max, '--', 'Color', [1 0.5 0], 'LineWidth', 2, ...
+          'Label', 'Hexatic/Crystal', 'LabelHorizontalAlignment', 'left');
+    hold off;
+    xlabel('Time (frames)', 'FontSize', 14, 'Interpreter', 'latex');
+    ylabel('$\langle\rho\rangle$', 'FontSize', 16, 'Interpreter', 'latex');
+    title('Average Local Density vs Time', 'FontSize', 14, 'Interpreter', 'latex');
     grid on;
+    set(gca, 'FontSize', 12, 'TickLabelInterpreter', 'latex');
     
-    % Keep axis limits fixed
-    if frame == 1
-        axis_limits = axis;
-    else
-        axis(axis_limits);
-    end
-    
-    pause(0.1);
-    
-    if mod(frame, 20) == 0
-        fprintf('Frame %d/%d (t = %.1f): %d particles, %d triangles\n', ...
-                frame, num_frames, current_time, num_particles_shown, num_triangles_shown);
-    end
-end
-
-fprintf('Animation complete!\n');
-
-%%
-%% TRAJECTORIES + TRIANGULATION ANIMATION - ALL PARTICLES
-fprintf('Creating trajectory + triangulation animation for ALL particles...\n');
-
-% Find time range
-all_times = [];
-for i = 1:num_tracks
-    all_times = [all_times; T{i}];
-end
-time_min = min(all_times);
-time_max = max(all_times);
-
-fprintf('Time range: %.1f to %.1f\n', time_min, time_max);
-fprintf('Showing ALL %d trajectories\n', num_tracks);
-
-% Create time vector for animation
-num_frames = 100;
-time_vector = linspace(time_min, time_max, num_frames);
-
-% Create figure
-figure('Position', [100 100 800 600]);
-
-% Animation loop
-for frame = 1:num_frames
-    current_time = time_vector(frame);
-    
-    clf; % Clear figure
-    hold on;
-    
-    % Collect current positions of ALL particles
-    current_positions_x = [];
-    current_positions_y = [];
-    
-    % For EVERY trajectory
-    for i = 1:num_tracks
-        
-        % Find points up to current time
-        time_mask = T{i} <= current_time;
-        
-        if sum(time_mask) > 0
-            % Plot trajectory path up to current time
-            % plot(X{i}(time_mask), Y{i}(time_mask), 'b-', 'LineWidth', 0.8, 'Color', [0.6 0.6 0.9]);
-            
-            % Get current particle position
-            current_x_traj = X{i}(time_mask);
-            current_y_traj = Y{i}(time_mask);
-            current_pos_x = current_x_traj(end);
-            current_pos_y = current_y_traj(end);
-            
-            % Store current position for triangulation
-            current_positions_x = [current_positions_x; current_pos_x];
-            current_positions_y = [current_positions_y; current_pos_y];
-        end
-    end
-    
-    % Create triangulation on current positions (if we have enough particles)
-    if length(current_positions_x) >= 3
-        % Remove any duplicate positions
-        positions = [current_positions_x, current_positions_y];
-        [unique_positions, ~] = unique(positions, 'rows');
-        triangulation_x = unique_positions(:, 1);
-        triangulation_y = unique_positions(:, 2);
-        
-        % Make triangulation
-        DT = delaunayTriangulation(triangulation_x, triangulation_y);
-        triangles = DT.ConnectivityList;
-        
-        % Draw triangles FIRST (so they appear behind particles)
-        for tri = 1:size(triangles, 1)
-            triangle_x = triangulation_x(triangles(tri, [1,2,3,1]));
-            triangle_y = triangulation_y(triangles(tri, [1,2,3,1]));
-            plot(triangle_x, triangle_y, 'k-', 'LineWidth', 0.5, 'Color', [0.3, 0.3, 0.3]);
-        end
-    end
-    
-    % Draw current particle positions ON TOP of triangles
-    if ~isempty(current_positions_x)
-        scatter(current_positions_x, current_positions_y, 10, 'red', 'filled', 'MarkerEdgeColor', 'black', 'LineWidth', 1);
-    end
-    
-    % Title and formatting
-    num_particles_shown = length(current_positions_x);
-    num_triangles_shown = 0;
-    if length(current_positions_x) >= 3
-        num_triangles_shown = size(triangles, 1);
-    end
-    
-    title(sprintf('ALL Trajectories + Triangulation - Time = %.1f\n%d particles, %d triangles', ...
-          current_time, num_particles_shown, num_triangles_shown));
-    xlabel('X position (pixels)');
-    ylabel('Y position (pixels)');
-    axis equal;
+    subplot(1,2,2)
+    plot(time_array, N_particles_array, 'o-', 'LineWidth', 2, ...
+         'MarkerSize', 6, 'MarkerFaceColor', 'auto');
+    xlabel('Time (frames)', 'FontSize', 14, 'Interpreter', 'latex');
+    ylabel('Number of Particles', 'FontSize', 14, 'Interpreter', 'latex');
+    title('Particle Count vs Time', 'FontSize', 14, 'Interpreter', 'latex');
     grid on;
+    set(gca, 'FontSize', 12, 'TickLabelInterpreter', 'latex');
     
-    % Keep axis limits fixed
-    if frame == 1
-        axis_limits = axis;
-    else
-        axis(axis_limits);
-    end
+    saveas(gcf, 'density_time_evolution.png');
+    fprintf('Summary plot saved as: density_time_evolution.png\n');
     
-    pause(0.1);
-    
-    if mod(frame, 20) == 0
-        fprintf('Frame %d/%d (t = %.1f): %d particles, %d triangles\n', ...
-                frame, num_frames, current_time, num_particles_shown, num_triangles_shown);
-    end
+    %% Save data
+    output_data = table(time_array, rho_avg_array, rho_std_array, N_particles_array, ...
+                        'VariableNames', {'Time', 'Rho_Mean', 'Rho_Std', 'N_Particles'});
+    writetable(output_data, 'density_evolution_data.csv');
+    fprintf('Data saved as: density_evolution_data.csv\n');
 end
 
-fprintf('Animation complete!\n');
+close(fig);
